@@ -1,0 +1,20 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+artifacts/
+*.log
+.claude/
+__pycache__/
+*.py[cod]
+
+# Recreated by npm run setup:hair; keep provenance and license in Git.
+public/models/*.tflite
+public/mediapipe/wasm/*.js
+public/mediapipe/wasm/*.wasm
+
+# Local AI fill service: environment, models and download cache
+inpaint-service/.venv/
+inpaint-service/models/
+inpaint-service/.uv-cache/
