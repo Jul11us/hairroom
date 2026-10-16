@@ -5,7 +5,9 @@
 
   <p><strong>剪发前，先看见自己。</strong><br />See your next look before the haircut.</p>
 
-  <p>亲手整理头发与发色 · 上传参考发型试戴 · 标注想法给理发师<br />Shape & recolor hair · Try a reference hairstyle · Annotate your salon card</p>
+  <p>鼠标整理头发 · 本机发色预览 · 图片标注与沟通卡 · 可选参考图 AI 试戴<br />Interactive hair editing · Local color previews · Annotated salon cards · Optional reference-image AI try-on</p>
+
+  <p>发色与标注在本机完成 · AI 试戴需自行配置 API key<br />Color and annotation tools run locally · Bring your own API key for AI try-on</p>
 
   <p>React 19 · Node.js 24 · MediaPipe · WebGL2 · Optional local AI fill</p>
 
@@ -47,7 +49,9 @@ Real reference photos come from Unsplash, with photographer credits and source l
 
 ## 中文
 
-Hairroom 是一个本地运行的发型探索工作室。先看看喜欢的发型，再告诉它你希望的长度、自然发质和每天愿意花多久打理；用照片尝试整理头发的轮廓，最后把参考图与沟通要点整理成一张卡，带给理发师。
+Hairroom 是一个本地运行的发型探索与理发沟通工作室。你可以浏览发型灵感，根据长度、发质和打理习惯比较方案，在自己的照片或虚构示例上用鼠标调整头发轮廓、预览新发色，再画线、圈选并写下备注，导出一张给理发师看的沟通卡。
+
+想参考某张喜欢的发型图？上传本人照片与目标参考图，配置自己的图像 API key 后，可主动授权生成个人试戴。发色预览、图片标注与沟通卡导出均可在本机使用，无需图像 API key。
 
 界面以暖白、鼠尾草绿和杂志式排版为主，支持桌面和手机浏览。当前应用界面为中文；本页提供中英文介绍。
 
@@ -126,7 +130,9 @@ npm run dev
 
 ## English
 
-Hairroom is a locally run hairstyle exploration studio. Browse references, describe your preferred length and daily routine, adjust the outline of visible hair with your mouse, and export a card to discuss with your stylist.
+Hairroom is a locally run studio for exploring hairstyles and communicating with your stylist. Browse looks, compare suggestions based on your length, texture, and daily routine, shape visible hair with your mouse, and preview a new color. Draw lines, circle areas, and add numbered notes, then export an annotated salon card.
+
+Bring a hairstyle reference alongside your own portrait for optional AI try-on, using your own image API key and explicit consent before sending either image. Local hair color previews, photo annotations, and salon card exports work without an image API key.
 
 The interface combines warm whites, sage green, and editorial typography, with desktop and mobile layouts. The application UI is currently in Chinese; this README provides both Chinese and English documentation.
 
