@@ -255,6 +255,91 @@
   color: #8f9c80;
   cursor: pointer;
 }
+.hair-color-controls {
+  border: 1px solid #dce4d0;
+  border-radius: 8px;
+  background: #f4f6ee;
+  padding: 12px;
+  margin-top: 16px;
+}
+.hair-color-heading,
+.hair-color-heading > span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.hair-color-heading {
+  justify-content: space-between;
+  color: #758563;
+}
+.hair-color-heading strong {
+  font-size: 11px;
+  font-weight: 500;
+}
+.hair-color-heading > button {
+  font-size: 9px;
+  color: #7b8c65;
+  padding: 3px 0;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.hair-color-heading > button:disabled {
+  opacity: 0.45;
+}
+.hair-color-swatches {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 12px;
+}
+.hair-color-swatches > button {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 36px;
+  padding: 5px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: #fffdf7;
+  color: #7d866d;
+  font-size: 9px;
+  white-space: nowrap;
+}
+.hair-color-swatches > button.selected {
+  border-color: #9aaf7a;
+  background: #e5edda;
+  color: #596e40;
+}
+.hair-color-swatches > button:hover:not(:disabled) {
+  border-color: #b4c49d;
+}
+.hair-color-swatches > button:focus-visible,
+.hair-color-heading > button:focus-visible {
+  outline: 2px solid #7b9360;
+  outline-offset: 2px;
+}
+.hair-color-chip {
+  display: grid;
+  place-items: center;
+  flex: 0 0 19px;
+  height: 19px;
+  border-radius: 50%;
+  background: var(--swatch);
+  color: white;
+  box-shadow: inset 0 0 0 1px #00000010;
+}
+.hair-color-chip.natural {
+  background: linear-gradient(135deg, #332d28, #b4a38b);
+}
+.hair-color-intensity.hair-range {
+  margin-top: 14px;
+}
+.hair-color-controls > p {
+  color: #919d80;
+  font-size: 9px;
+  line-height: 1.8;
+  margin-top: 11px;
+}
 .hair-breeze:has(input:checked) {
   background: #eef3e5;
   border-style: solid;

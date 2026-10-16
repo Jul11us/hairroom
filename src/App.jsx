@@ -20,6 +20,7 @@ import {
   LockKeyhole,
   Maximize2,
   MousePointer2,
+  PencilLine,
   Plus,
   RotateCcw,
   Scissors,
@@ -38,6 +39,22 @@ import {
 import { demoAsset, exportSalonCard, salonText } from "./lib/export-card.js";
 import HairEditor from "./components/HairEditor.jsx";
 import HomeShowcase from "./components/HomeShowcase.jsx";
+import AnnotationEditor from "./components/AnnotationEditor.jsx";
+import ReferenceTryOn from "./components/ReferenceTryOn.jsx";
+import "./components/studio-extras.css";
+
+const PERSONAL_STYLE = {
+  id: "original", name: "我的理发想法", englishName: "My salon notes",
+  salonNotes: ["请按照片标注确认想保留和调整的位置。", "结合我的自然发质、发量与生长方向，沟通可实现的长度和层次。"],
+  cautions: ["发色预览与二维整理仅供沟通，实际染剪效果请与理发师确认。"],
+};
+const REFERENCE_STYLE = {
+  id: "reference-look", name: "我的参考发型", englishName: "A look from your reference",
+  tagline: "把喜欢的轮廓，放到自己的照片上看看。",
+  description: "借鉴你上传的参考发型，保留你自己的五官和原发色。请核对发际线与遮挡，并结合实际发量和长度沟通。",
+  salonNotes: ["参考上传图片的发型轮廓、刘海、长度和层次。", "保留自然发色；请根据实际发质和发量调整。"],
+  cautions: ["AI 试戴不保证身份细节或实际剪发效果。"],
+};
 
 const PANELS = {
   original: [0, 0],
@@ -162,7 +179,7 @@ function Dialog({
       if (e.key === "Tab") {
         const focusables = [
           ...ref.current.querySelectorAll(
-            "button:not(:disabled),input:not(:disabled),select:not(:disabled),a[href]",
+            "button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),a[href]",
           ),
         ];
         const first = focusables[0],
@@ -292,6 +309,14 @@ export default function App() {
   const [generated, setGenerated] = useState({});
   const [hairEdits, setHairEdits] = useState({});
   const [editorTarget, setEditorTarget] = useState(null);
+  const [annotations, setAnnotations] = useState({});
+  const [annotationTarget, setAnnotationTarget] = useState(null);
+  const [editorDirty, setEditorDirty] = useState(false);
+  const [annotationDirty, setAnnotationDirty] = useState(false);
+  const [referencePhoto, setReferencePhoto] = useState(null);
+  const [referenceName, setReferenceName] = useState("");
+  const [referenceBusy, setReferenceBusy] = useState(false);
+  const [referenceConsent, setReferenceConsent] = useState(false);
   const [generation, setGeneration] = useState(null);
   const [consent, setConsent] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -309,6 +334,9 @@ export default function App() {
   });
   const fileRef = useRef(null);
   const uploadSeqRef = useRef(0);
+  const referenceSeqRef = useRef(0);
+  const referencePhotoRef = useRef(referencePhoto);
+  referencePhotoRef.current = referencePhoto;
   const currentPhotoRef = useRef(photo);
   currentPhotoRef.current = photo;
   const abortRef = useRef(null);
@@ -390,10 +418,12 @@ export default function App() {
       setGeneration(null);
       setGenerated({});
       setHairEdits({});
+      setAnnotations({});
       setPhoto(result);
       setPhotoName(file.name);
       setSampleChosen(false);
       setConsent(false);
+      setReferenceConsent(false);
       notify("照片已准备好，仅保留在当前页面");
     } catch (e) {
       if (uploadSeq === uploadSeqRef.current) setError(e.message);
@@ -413,8 +443,10 @@ export default function App() {
     setPhotoName("");
     setGenerated({});
     setHairEdits({});
+    setAnnotations({});
     setGeneration(null);
     setConsent(false);
+    setReferenceConsent(false);
     setSampleChosen(false);
   }
   function chooseSample() {
@@ -422,8 +454,8 @@ export default function App() {
     setSampleChosen(true);
     notify("正在体验 AI 示例，未分析你的脸型");
   }
-  async function tryOn(style) {
-    if (!photo || !consent || !config.tryOnAvailable || generation) return;
+  async function tryOn(style, reference = null) {
+    if (!photo || !(reference ? referenceConsent : consent) || !config.tryOnAvailable || generation || photoBusy || referenceBusy) return;
     const inputPhoto = photo;
     const controller = new AbortController();
     abortRef.current = controller;
@@ -435,6 +467,7 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           photo,
+          ...(reference ? { referencePhoto: reference } : {}),
           style: {
             id: style.id,
             name: style.name,
@@ -445,17 +478,20 @@ export default function App() {
       });
       const data = await r.json();
       if (!r.ok) throw new Error(data.error || "试戴生成失败，请稍后重试。");
-      if (currentPhotoRef.current === inputPhoto) {
+      if (currentPhotoRef.current === inputPhoto && !controller.signal.aborted
+          && abortRef.current === controller
+          && (!reference || referencePhotoRef.current === reference)) {
         setGenerated((v) => ({ ...v, [style.id]: data.image }));
         setHairEdits((v) => {
           const next = { ...v };
           delete next[style.id];
           return next;
         });
+        setAnnotations((value) => { const next = { ...value }; delete next[style.id]; return next; });
         notify("试戴已生成，请核对五官与发量是否符合实际");
       }
     } catch (e) {
-      if (e.name !== "AbortError")
+      if (e.name !== "AbortError" && abortRef.current === controller && currentPhotoRef.current === inputPhoto)
         setError(e.message || "连接失败，请稍后重试。");
     } finally {
       if (abortRef.current === controller) setGeneration(null);
@@ -464,16 +500,19 @@ export default function App() {
   async function download(style) {
     setExporting(true);
     try {
+      const annotation = annotations[style.id];
+      const edit = hairEdits[style.id];
       await exportSalonCard({
         style,
-        photo: hairEdits[style.id]?.original || photo,
-        generatedImage: hairEdits[style.id]?.image || generated[style.id],
-        originalLabel: hairEdits[style.id]
+        photo: edit?.original || photo || annotation?.original,
+        generatedImage: annotation?.image || edit?.image || generated[style.id],
+        personalNotes: annotation?.notes || [],
+        originalLabel: !edit && !photo && annotation?.demo ? "AI 示例 · 标注前" : hairEdits[style.id]
           ? hairEdits[style.id].demo
             ? "AI 示例 · 整理前"
             : "整理前照片"
           : undefined,
-        resultLabel: hairEdits[style.id]
+        resultLabel: annotation ? `${annotation.demo ? "AI 示例 · " : ""}我的理发标注` : hairEdits[style.id]
           ? hairEdits[style.id].demo
             ? "AI 示例 · 手动整理"
             : "手动整理 · 二维预览"
@@ -488,7 +527,7 @@ export default function App() {
   }
   async function copy(style) {
     try {
-      await navigator.clipboard.writeText(salonText(style));
+      await navigator.clipboard.writeText(salonText(style, annotations[style.id]?.notes));
       notify("理发沟通要点已复制");
     } catch {
       setError("浏览器未允许复制，请使用「保存沟通卡」。");
@@ -497,7 +536,7 @@ export default function App() {
 
   function previewLabel(style) {
     const edit = hairEdits[style.id];
-    if (edit) return edit.demo ? "AI 示例 · 手动整理" : "手动整理 · 二维预览";
+    if (edit) return `${edit.demo ? "AI 示例 · " : ""}${edit.colorName ? `${edit.colorName} · ` : ""}手动整理`;
     return generated[style.id]
       ? "你的 AI 试戴"
       : style.demoKey
@@ -506,9 +545,10 @@ export default function App() {
   }
 
   function openHairEditor(style = null) {
+    setEditorDirty(false);
     const key = style?.id || "original";
     const previous = hairEdits[key];
-    let imageSrc = previous?.image || (style ? generated[style.id] : photo);
+    let imageSrc = (previous?.editorState ? previous.original : previous?.image) || (style ? generated[style.id] : photo);
     let sourcePanel = null;
     let demo = previous?.demo || false;
     if (!imageSrc && style?.demoKey) {
@@ -525,6 +565,7 @@ export default function App() {
       key,
       imageSrc,
       sourcePanel,
+      initialState: previous?.editorState,
       demo,
       sourceLabel: demo
         ? `AI 示例${style ? ` · ${style.name}` : " · 原发型"}`
@@ -543,8 +584,87 @@ export default function App() {
         sourceLabel: editorTarget.sourceLabel,
       },
     }));
+    setAnnotations((value) => { const next = { ...value }; delete next[editorTarget.key]; return next; });
     setEditorTarget(null);
     notify("已保存手动整理预览，照片仅保留在当前页面");
+  }
+
+  async function handleReference(file) {
+    if (!file) return;
+    const seq = ++referenceSeqRef.current;
+    setReferenceBusy(true);
+    setReferenceConsent(false);
+    setError("");
+    try {
+      const image = await preparePhoto(file);
+      if (seq !== referenceSeqRef.current) return;
+      referencePhotoRef.current = image;
+      setReferencePhoto(image);
+      setReferenceConsent(false);
+      setReferenceName(file.name);
+      clearReferenceResult();
+      notify("参考图已准备好，尚未发送给图像服务");
+    } catch (error) {
+      if (seq === referenceSeqRef.current) setError(error.message);
+    } finally {
+      if (seq === referenceSeqRef.current) setReferenceBusy(false);
+    }
+  }
+
+  function clearReferenceResult() {
+    for (const setter of [setGenerated, setHairEdits, setAnnotations]) {
+      setter((value) => { const next = { ...value }; delete next[REFERENCE_STYLE.id]; return next; });
+    }
+  }
+
+  function removeReference() {
+    ++referenceSeqRef.current;
+    setReferenceBusy(false);
+    referencePhotoRef.current = null;
+    setReferencePhoto(null);
+    setReferenceName("");
+    setReferenceConsent(false);
+    clearReferenceResult();
+  }
+
+  function openAnnotationEditor(style = PERSONAL_STYLE) {
+    setAnnotationDirty(false);
+    const key = style.id;
+    const edit = hairEdits[key];
+    let imageSrc = edit?.image || generated[key];
+    let sourcePanel = null;
+    let demo = Boolean(edit?.demo);
+    if (!imageSrc && key !== "original" && style.demoKey) {
+      imageSrc = demoAsset(style);
+      sourcePanel = PANELS[style.demoKey];
+      demo = true;
+    } else if (!imageSrc && photo) imageSrc = photo;
+    else if (!imageSrc) {
+      imageSrc = demoAsset(style.id === "original" ? activeGenderStyle : style);
+      sourcePanel = PANELS.original;
+      demo = true;
+    }
+    const sourceKey = `${imageSrc}|${sourcePanel?.join(",") || "whole"}`;
+    setAnnotationTarget({ key, imageSrc, sourcePanel, sourceKey, demo,
+      photoVersion: photo, editVersion: hairEdits[key]?.image, generatedVersion: generated[key],
+      sourceLabel: demo ? "AI 示例 · 理发标注" : "你的照片 · 理发标注",
+      initialValue: annotations[key]?.sourceKey === sourceKey ? annotations[key] : undefined,
+    });
+  }
+
+  function saveAnnotation(result) {
+    const key = annotationTarget.key;
+    if (photo !== annotationTarget.photoVersion || hairEdits[key]?.image !== annotationTarget.editVersion
+        || generated[key] !== annotationTarget.generatedVersion) {
+      setAnnotationTarget(null);
+      setError("原照片或试戴方案已更新，请在新图片上重新标注。");
+      return;
+    }
+    setAnnotations((value) => ({ ...value, [annotationTarget.key]: {
+      ...result, sourceKey: annotationTarget.sourceKey, demo: annotationTarget.demo,
+    } }));
+    setAnnotationTarget(null);
+    notify("理发标注已保存，可随沟通卡导出");
   }
 
   if (home)
@@ -847,13 +967,22 @@ export default function App() {
                   >
                     <span>
                       <MousePointer2 size={15} />
-                      {photo ? "用鼠标整理我的头发" : "用鼠标整理一下"}
+                      {photo ? "整理头发 / 试发色" : "用示例整理 / 试发色"}
                     </span>
                     <ArrowUpRight size={14} />
                   </button>
                   <span className="hair-entry-note">
-                    拖动方向 · 局部蓬松 · 可随时撤销
+                    拖动方向 · 局部蓬松 · 本机试发色
                   </span>
+                  <div className="photo-extra-actions">
+                    <button className="secondary-button" disabled={photoBusy || !!generation}
+                      onClick={() => openAnnotationEditor()}><PencilLine size={14} />标注理发想法</button>
+                    {(hairEdits.original || annotations.original) && <button className="secondary-button"
+                      disabled={exporting} onClick={() => download(PERSONAL_STYLE)}>
+                      <ArrowDownToLine size={14} />保存我的沟通卡
+                    </button>}
+                  </div>
+                  {annotations.original && <p className="annotation-saved-note">已保存 {annotations.original.marks.length} 处理发标注，备注会一起导出。</p>}
                   {hairEdits.original && (
                     <div className="hair-edited-summary">
                       <img
@@ -1110,6 +1239,19 @@ export default function App() {
 
               {tab === "studio" && (
                 <>
+                  <ReferenceTryOn
+                    photo={photo} reference={referencePhoto} referenceName={referenceName}
+                    loading={referenceBusy} available={config.tryOnAvailable}
+                    locked={!!generation || photoBusy}
+                    busy={generation === REFERENCE_STYLE.id} consent={referenceConsent}
+                    onConsent={setReferenceConsent} onPhoto={() => fileRef.current?.click()}
+                    onReference={handleReference} onRemove={removeReference}
+                    onGenerate={() => tryOn(REFERENCE_STYLE, referencePhoto)}
+                    onCancel={() => { abortRef.current?.abort(); setGeneration(null); }}
+                    result={hairEdits[REFERENCE_STYLE.id]?.image || generated[REFERENCE_STYLE.id]}
+                    onResult={() => setSelected(REFERENCE_STYLE)}
+                    onAnnotate={() => openAnnotationEditor(REFERENCE_STYLE)}
+                  />
                   <div className="consultation-note">
                     <div className="consultation-icon">
                       <Scissors size={22} strokeWidth={1.2} />
@@ -1182,21 +1324,38 @@ export default function App() {
         <Dialog
           wide
           className="hairroom-editor-dialog"
-          title="亲手整理，找到喜欢的轮廓"
-          subtitle="在头发上按住鼠标拖动。也可以用手指；松开后，再看看整理前后的区别。"
-          onClose={() => setEditorTarget(null)}
+          title="整理轮廓，试试新的发色"
+          subtitle="拖动头发调整轮廓，或选一种发色看看。识别与编辑均在本机完成。"
+          onClose={() => {
+            if (!editorDirty || window.confirm("还有未保存的整理或发色修改，确定放弃吗？")) setEditorTarget(null);
+          }}
         >
           <HairEditor
             key={editorTarget.key}
             imageSrc={editorTarget.imageSrc}
             sourcePanel={editorTarget.sourcePanel}
+            initialState={editorTarget.initialState}
             sourceLabel={editorTarget.sourceLabel}
+            onDirtyChange={setEditorDirty}
             onSave={saveHairEdit}
           />
         </Dialog>
       )}
 
-      {selected && !editorTarget && (
+      {annotationTarget && (
+        <Dialog wide className="salon-annotation-dialog"
+          title="把想法画给理发师看"
+          subtitle="画线、圈选或添加编号备注。标注只用于理发沟通，不会提交给图像服务。"
+          onClose={() => {
+            if (!annotationDirty || window.confirm("还有未保存的理发标注，确定放弃吗？")) setAnnotationTarget(null);
+          }}>
+          <AnnotationEditor imageSrc={annotationTarget.imageSrc}
+            sourcePanel={annotationTarget.sourcePanel} sourceLabel={annotationTarget.sourceLabel}
+            initialValue={annotationTarget.initialValue} onSave={saveAnnotation} onDirtyChange={setAnnotationDirty} />
+        </Dialog>
+      )}
+
+      {selected && !editorTarget && !annotationTarget && (
         <Dialog
           wide
           title={selected.name}
@@ -1259,33 +1418,42 @@ export default function App() {
                   <ArrowUpRight size={14} />
                 </button>
                 <p>
-                  调整刘海方向和局部轮廓，改到喜欢再保存。示例编辑会一直标注为示例。
+                  调整刘海方向、轮廓或发色，改到喜欢再保存。示例编辑会一直标注为示例。
                 </p>
+              </div>
+              <div className="detail-annotation">
+                <button className="secondary-button" disabled={!!generation}
+                  onClick={() => openAnnotationEditor(selected)}><PencilLine size={15} />标注这款方案</button>
+                {annotations[selected.id] && <small>已保存 {annotations[selected.id].marks.length} 处标注，沟通卡将包含标注与备注。</small>}
               </div>
               <div className="tryon-box">
                 {photo ? (
                   <>
                     <p>
                       {config.tryOnAvailable
-                        ? "用这张自拍生成试戴，五官和肤质尽量保持原样。"
+                        ? selected.id === REFERENCE_STYLE.id
+                          ? "用你的照片和参考发型生成试戴，保留原发色。"
+                          : "用这张自拍生成试戴，五官和肤质尽量保持原样。"
                         : "真实自拍试戴暂未开放。当前可查看款式参考、保存沟通卡。"}
                     </p>
                     {config.tryOnAvailable && (
                       <label className="consent-check">
                         <input
                           type="checkbox"
-                          checked={consent}
-                          onChange={(e) => setConsent(e.target.checked)}
+                          checked={selected.id === REFERENCE_STYLE.id ? referenceConsent : consent}
+                          disabled={photoBusy || referenceBusy || !!generation || (selected.id === REFERENCE_STYLE.id && !referencePhoto)}
+                          onChange={(e) => selected.id === REFERENCE_STYLE.id ? setReferenceConsent(e.target.checked) : setConsent(e.target.checked)}
                         />
-                        我同意将这张照片发送至图像服务处理
+                        {selected.id === REFERENCE_STYLE.id ? "我同意将自己的照片和参考图发送至 OpenAI 处理，可能产生 API 费用" : "我同意将这张照片发送至图像服务处理"}
                       </label>
                     )}
                     <button
                       className="primary-button"
                       disabled={
-                        !config.tryOnAvailable || !consent || !!generation
+                        !config.tryOnAvailable || !!generation || photoBusy || referenceBusy
+                        || (selected.id === REFERENCE_STYLE.id ? !referenceConsent || !referencePhoto : !consent)
                       }
-                      onClick={() => tryOn(selected)}
+                      onClick={() => tryOn(selected, selected.id === REFERENCE_STYLE.id ? referencePhoto : null)}
                     >
                       {generation === selected.id ? (
                         <>
@@ -1406,7 +1574,7 @@ export default function App() {
                   )}
                   保存理发沟通卡
                 </button>
-                <button
+                {selected.id !== REFERENCE_STYLE.id && <button
                   className={`secondary-button ${savedIds.includes(selected.id) ? "saved" : ""}`}
                   onClick={() => toggleSave(selected)}
                 >
@@ -1417,7 +1585,7 @@ export default function App() {
                     }
                   />
                   {savedIds.includes(selected.id) ? "已收藏" : "收藏"}
-                </button>
+                </button>}
               </div>
             </div>
           </div>

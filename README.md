@@ -5,7 +5,7 @@
 
   <p><strong>剪发前，先看见自己。</strong><br />See your next look before the haircut.</p>
 
-  <p>浏览发型灵感 · 亲手整理头发 · 比较喜欢的方案 · 带着沟通卡去理发<br />Explore hairstyles · Shape hair with your mouse · Compare looks · Bring a salon card</p>
+  <p>亲手整理头发与发色 · 上传参考发型试戴 · 标注想法给理发师<br />Shape & recolor hair · Try a reference hairstyle · Annotate your salon card</p>
 
   <p>React 19 · Node.js 24 · MediaPipe · WebGL2 · Optional local AI fill</p>
 
@@ -31,6 +31,12 @@ Real reference photos come from Unsplash, with photographer credits and source l
 
 ![Local hair editor using a fictional AI example](docs/assets/editor.jpg)
 
+### 发色与理发标注 / Hair color and salon annotations
+
+![Local hair color preview and salon annotations on a fictional AI example](docs/assets/annotations.jpg)
+
+<img src="docs/assets/salon-card.png" width="440" alt="Exported salon card with local color preview, image marks and stylist notes; fictional AI portrait" />
+
 ### 手机端 / Mobile studio
 
 <img src="docs/assets/mobile.jpg" width="360" alt="Hairroom mobile studio with fictional AI examples" />
@@ -53,9 +59,14 @@ Hairroom 是一个本地运行的发型探索工作室。先看看喜欢的发�
 | 偏好建议 | 根据长度、发质、发量、打理时间和目标，用可解释的本地规则排序发型方向 |
 | 鼠标整理头发 | MediaPipe 本机识别头发；支持梳理、拨动回弹、局部蓬松、收拢和微风预览 |
 | 精细调整与对比 | 手动修正选区、撤销与重做、按住查看整理前、下载整理后的图片 |
+| 本机发色预览 | 在头发选区尝试深棕、栗色、冷茶、酒红等发色，调整强度，保留光影；随整理结果保存与导出 |
+| 理发图片标注 | 在照片上画线、圈选或添加编号备注，支持撤销与重做，导出标注图片或含备注的理发沟通卡 |
 | 方案与沟通卡 | 收藏款式，将参考图、整理结果与理发要点导出为 PNG 沟通卡 |
 | 本机 AI 补全（可选） | 用本地 NVIDIA GPU 补画头发移开后露出的区域，需要另装 Python 服务与模型 |
 | API 试戴（可选） | 通过服务器调用 OpenAI Images 编辑接口，需要自己的 API key 和可用模型权限 |
+| 参考图试戴（可选） | 上传自己的照片和喜欢的发型参考，明确授权后同时提交两图，借鉴发型、保留本人五官与原发色 |
+
+进入工作室后，点击照片旁的「整理头发 / 试发色」（示例模式为「用示例整理 / 试发色」）进入编辑器；「标注理发想法」用于画线、圈选与备注。保存后点击「保存我的沟通卡」，可导出自己的整理或标注结果。款式详情也能分别编辑和标注；工作室下方的「带着喜欢的发型来」提供参考图试戴。
 
 ### 快速开始
 
@@ -102,11 +113,14 @@ npm run dev
 - 选择照片后在当前页面内存中预览；头发识别和鼠标编辑在浏览器本机进行。支持 JPG、PNG、WebP，原始照片最大 8 MiB。
 - 首页会从 Unsplash 加载参考照片。自动识别使用的 MediaPipe 模型与 Wasm 由本应用本地提供；首次运行先执行 `npm run setup:hair` 下载并校验资源。
 - 启用本机补全时，编辑区域发送给本机 Python 服务；主动发起 API 试戴时，照片经本机 Node 服务发送至 OpenAI。
+- 发色预览和图片标注在本机执行，不请求图像生成服务。参考图只有在勾选两图处理同意并点击生成后，才会与本人照片一起发送；上传、更换或移除参考图会清除对应旧结果和授权。
 - 照片和生成结果默认不写入服务器磁盘，页面刷新后清除；款式收藏 ID 保存在浏览器 localStorage，手动下载的图片保存在设备中。外部服务另有自己的数据处理规则。
 
 ### 当前边界
 
 偏好建议是规则排序，没有分析脸型，也不保证哪款发型最适合你。鼠标整理是二维照片变形；露出原本遮住的额头或背景需要推测或生成补全。AI 示例不代表个性化试戴效果，API 试戴的身份保真和实际剪发效果没有保证。
+
+发色预览只在选区内做颜色与光影混合，不能模拟真实漂染、底色和发质对上色的全部影响。图片标注不会被自动当成生成指令；它们用于与理发师沟通。
 
 项目面向本机使用，Node 服务默认只监听 `127.0.0.1`。当前没有账户系统、公共托管服务、实时摄像头、浏览器插件或原生桌面安装包。OpenAI 付费生成未在本次发布中实测。
 
@@ -124,9 +138,14 @@ The interface combines warm whites, sage green, and editorial typography, with d
 | Preference suggestions | Explainable local rules rank looks by length, texture, density, maintenance, and goals |
 | Interactive hair editor | Local MediaPipe segmentation with combing, spring-back motion, volume, gathering, and a breeze preview |
 | Editing controls | Manual selection correction, undo/redo, before/after comparison, and image downloads |
+| Local hair color | Preset shades and an intensity slider, preserving hair shading and following the edited shape; saved and exported with the preview |
+| Salon annotations | Freehand strokes, lines, circles, and numbered notes; download marked images or export notes with a salon card |
 | Salon cards | Save style choices and export references, edited previews, and consultation notes as a PNG |
 | Optional local AI fill | A separate Python service uses an NVIDIA GPU to fill regions uncovered by moving hair |
 | Optional API try-on | A server-side OpenAI Images editing integration using your own API key and model access |
+| Optional reference try-on | Your portrait and a hairstyle reference, sent together after explicit consent; the prompt preserves your identity and original hair color |
+
+In the studio, choose **整理头发 / 试发色** (edit hair / try color) beside your photo, or **用示例整理 / 试发色** for a fictional demo. **标注理发想法** opens the annotation tools. Save and choose **保存我的沟通卡** to export the edited or marked image with your notes. Style details also support their own edits and annotations. The **带着喜欢的发型来** section below the suggestions accepts a reference image.
 
 ### Quick start
 
@@ -149,6 +168,8 @@ On Windows, after dependency and model setup, you can also double-click `启动H
 
 For API try-on, copy `.env.example` to `.env`, set `OPENAI_API_KEY` and an `OPENAI_IMAGE_MODEL` available to your account, and restart the Node server. Explicitly requesting try-on sends the selected photo to OpenAI through the local server and may incur charges. Never put API keys in browser code or `VITE_` variables. Live paid generation was not tested for this release.
 
+Reference try-on extends the same endpoint with an optional `referencePhoto` data URL. Both images are validated separately, each up to 8 MiB, with a bounded total request body. They are sent in portrait/reference order through the [OpenAI multi-image edit API](https://developers.openai.com/api/reference/resources/images/methods/edit). Changing either image invalidates the relevant result and consent. The original single-image style workflow remains supported.
+
 Local fill is separate and optional. It uses Python 3.12, Stable Diffusion 1.5 inpainting, and LCM-LoRA. The pinned Python dependencies target Windows / CUDA 13.0; other platforms may need adjustments. Model downloads are approximately 2.11 GiB and are excluded from Git. With a compatible NVIDIA GPU, install and start it in a separate terminal:
 
 ```powershell
@@ -167,6 +188,8 @@ Photo selection, segmentation, and manual editing stay local. Optional fill send
 
 The gallery loads reference photos from Unsplash. Demo portraits are fictional AI-generated adults and are labelled as examples. Suggestions use rules rather than face-shape analysis. Manual editing is a two-dimensional simulation; hidden skin or background must be estimated or generated. Previews do not guarantee identity preservation or an actual haircut outcome.
 
+Hair coloring and salon annotations run locally. The color preview is a masked visual blend rather than a prediction of chemical dye results. Annotation notes are for your stylist and are not silently submitted to a generation service.
+
 This is a local prototype bound to `127.0.0.1`, without accounts or public-hosting controls. It does not include real-time camera editing, a browser extension, or a native desktop package.
 
 ## 开发与验证 / Development & checks
@@ -176,7 +199,7 @@ npm test
 npm run build
 ```
 
-50 Node tests cover photo attribution, preference ranking, hair physics and warping, API validation, same-origin checks, rate limiting, error handling, static-file boundaries, and local-fill forwarding. API tests use injected transports and local servers, without paid image-generation requests. GitHub Actions runs the tests, hair-asset setup, and production build on Node.js 24.
+The Node suite covers photo attribution, preference ranking, hair physics and warping, masked hair color, annotation coordinates and notes, single- and multi-image API validation, same-origin checks, rate limiting, error handling, static-file boundaries, and local-fill forwarding. API tests use injected transports and local servers, without paid image-generation requests. GitHub Actions runs the tests, hair-asset setup, and production build on Node.js 24.
 
 | Path | Purpose |
 | --- | --- |

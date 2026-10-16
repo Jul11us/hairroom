@@ -11,6 +11,7 @@ import {
   LoaderCircle,
   Minimize2,
   Move,
+  Palette,
   Paintbrush,
   Redo2,
   RotateCcw,
@@ -42,6 +43,14 @@ import {
   transferRest,
 } from "../lib/hair-physics.js";
 import { createHairRenderer } from "../lib/hair-renderer.js";
+import {
+  colorHair,
+  DEFAULT_HAIR_COLOR,
+  HAIR_COLORS,
+  hairColorName,
+  hasHairColor,
+} from "../lib/hair-color.js";
+import { readHairEditorState, sameHairEditorState } from "../lib/hair-editor-state.js";
 import "./hair-editor.css";
 
 const TOOLS = [
@@ -105,13 +114,21 @@ export default function HairEditor({
   imageSrc,
   sourcePanel,
   sourceLabel,
+  initialState,
   onSave,
+  onDirtyChange,
 }) {
   const canvasRef = useRef(null);
   const overlayRef = useRef(null);
   const cursorRef = useRef(null);
   const stageRef = useRef(null);
   const originalRef = useRef(null);
+  const colorRef = useRef({ ...DEFAULT_HAIR_COLOR });
+  const colorImageRef = useRef(null);
+  const colorUnderRef = useRef(null);
+  const uploadedImageRef = useRef(null);
+  const colorGestureRef = useRef(null);
+  const baselineRef = useRef(null);
   const maskRef = useRef(null);
   const rigRef = useRef(null);
   const plateRef = useRef(null);
@@ -151,9 +168,15 @@ export default function HairEditor({
   const [comparing, setComparing] = useState(false);
   const [coverage, setCoverage] = useState(0);
   const [changed, setChanged] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [color, setColor] = useState({ ...DEFAULT_HAIR_COLOR });
   const paintMode = tool === "add" || tool === "erase";
   const ready = !!originalRef.current && status !== "loading";
   comparingRef.current = comparing;
+
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
 
   // Draw the current frame: GPU when available, otherwise the CPU reference.
   const paint = useCallback(() => {
@@ -162,21 +185,27 @@ export default function HairEditor({
     const rig = rigRef.current;
     const showOriginal = comparingRef.current || !rig;
     const field = rig ? hairField(rig, fieldRef.current) : null;
+    const edited = colorImageRef.current ?? original;
     if (rendererRef.current) {
+      const texture = showOriginal ? original : edited;
+      if (uploadedImageRef.current !== texture) {
+        rendererRef.current.setImage(texture, showOriginal ? underRef.current : colorUnderRef.current);
+        uploadedImageRef.current = texture;
+      }
       rendererRef.current.render(field, showOriginal);
       return;
     }
     const pixels = showOriginal
       ? original.data
       : renderHair({
-          image: original,
+          image: edited,
           mask: maskRef.current,
           plate: plateRef.current,
           field,
           rig,
           mesh: meshRef.current,
           soft: softRef.current,
-          under: underRef.current,
+          under: colorUnderRef.current,
         });
     context2dRef.current?.putImageData(
       new ImageData(pixels, original.width, original.height),
@@ -280,18 +309,18 @@ export default function HairEditor({
     const fill = fillRef.current;
     const rig = rigRef.current,
       original = originalRef.current;
-    if (!rig || !original || !restChanged(rig)) return;
+    if (!fillEnabledRef.current || !rig || !original || !restChanged(rig)) return;
     const key = fill.key;
     const { width, height } = original;
     const reveal = new Float32Array(width * height);
     const pixels = renderHair({
-      image: original,
+      image: colorImageRef.current ?? original,
       mask: maskRef.current,
       plate: plateRef.current,
       field: hairField(rig, undefined, { dynamic: false }),
       rig,
       soft: softRef.current,
-      under: underRef.current,
+      under: colorUnderRef.current,
       reveal,
     });
     const hole = new Uint8ClampedArray(width * height * 4);
@@ -324,9 +353,10 @@ export default function HairEditor({
         signal: controller.signal,
       });
       const data = await response.json();
+      if (!fillEnabledRef.current || controller.signal.aborted || key !== fill.key || disposedRef.current) return;
       if (!response.ok) throw new Error(data.error || "补图失败");
       const filled = await loadImage(data.image);
-      if (key !== fill.key || disposedRef.current) return;
+      if (!fillEnabledRef.current || controller.signal.aborted || key !== fill.key || disposedRef.current) return;
       const patch = document.createElement("canvas");
       patch.width = width;
       patch.height = height;
@@ -348,10 +378,10 @@ export default function HairEditor({
         overlayContext.clearRect(0, 0, width, height);
         overlayContext.drawImage(patch, 0, 0);
       }
-      if (!frameRef.current && !comparingRef.current) showFill(true);
+      if (fillEnabledRef.current && !frameRef.current && !comparingRef.current) showFill(true);
       setFillState("shown");
     } catch (e) {
-      if (e.name === "AbortError" || key !== fill.key) return;
+      if (e.name === "AbortError" || !fillEnabledRef.current || controller.signal.aborted || key !== fill.key || disposedRef.current) return;
       setFillState("error");
       setMessage("本机 AI 补全暂时不可用：" + e.message);
     } finally {
@@ -371,10 +401,22 @@ export default function HairEditor({
     if (!fill.abort) fill.timer = setTimeout(requestFill, 250);
   };
 
-  const rebuildRig = useCallback((keepStyle) => {
+  // Only settings/selection changes recolour the source. Animation samples the
+  // cached texture, so colours follow the mesh without a full-frame readback.
+  const refreshColor = useCallback(() => {
+    const original = originalRef.current;
+    if (!original || !maskRef.current) return;
+    const image = colorHair(original, maskRef.current, colorRef.current);
+    colorImageRef.current = image;
+    colorUnderRef.current = image === original ? underRef.current : blurImage(image);
+    uploadedImageRef.current = null;
+    setChanged((rigRef.current && restChanged(rigRef.current)) || hasHairColor(colorRef.current));
+  }, []);
+
+  const rebuildRig = useCallback((keepStyle, preparedRig = null) => {
     const original = originalRef.current,
       mask = maskRef.current;
-    const rig = createHairRig(original, mask);
+    const rig = preparedRig ?? createHairRig(original, mask);
     invalidateFillRef.current();
     if (keepStyle && rigRef.current) transferRest(rigRef.current, rig);
     rigRef.current = rig;
@@ -388,8 +430,8 @@ export default function HairEditor({
       renderer.setPlate(plateRef.current);
       renderer.setMesh(rig, meshRef.current);
     }
-    setChanged(restChanged(rig));
-  }, []);
+    refreshColor();
+  }, [refreshColor]);
 
   const updateCoverage = useCallback(() => {
     const mask = maskRef.current;
@@ -402,11 +444,17 @@ export default function HairEditor({
   // Masks are replaced, never mutated, so history can share them.
   const snapshot = useCallback(
     () => ({
+      width: originalRef.current?.width,
+      height: originalRef.current?.height,
       mask: maskRef.current,
       rest: rigRef.current ? new Float32Array(rigRef.current.R) : null,
+      color: { ...colorRef.current },
     }),
     [],
   );
+  useEffect(() => {
+    setDirty(Boolean(baselineRef.current && !sameHairEditorState(snapshot(), baselineRef.current)));
+  }, [revision, color, changed, snapshot]);
   const pushHistory = useCallback((entry) => {
     undoRef.current.push(entry);
     if (undoRef.current.length > 16) undoRef.current.shift();
@@ -476,6 +524,8 @@ export default function HairEditor({
 
   useEffect(() => {
     disposedRef.current = false;
+    baselineRef.current = null;
+    setDirty(false);
     let cancelled = false;
     async function initialize() {
       try {
@@ -507,6 +557,9 @@ export default function HairEditor({
           height,
           data: new Uint8ClampedArray(pixels.data),
         };
+        colorRef.current = { ...DEFAULT_HAIR_COLOR };
+        setColor(colorRef.current);
+        colorGestureRef.current = null;
         maskRef.current = new Float32Array(width * height);
         underRef.current = blurImage(originalRef.current);
         const canvas = canvasRef.current;
@@ -520,13 +573,35 @@ export default function HairEditor({
             context2dRef.current = canvas.getContext("2d");
         }
         rendererRef.current?.setImage(originalRef.current, underRef.current);
+        uploadedImageRef.current = originalRef.current;
         rigRef.current = null;
         undoRef.current = [];
         redoRef.current = [];
+        // Reopen from the untouched source plus settings, never the flattened
+        // tinted result. This keeps colour changes reversible across sessions.
+        const saved = readHairEditorState(initialState, width, height);
+        if (saved) {
+          const restoredRig = createHairRig(originalRef.current, saved.mask);
+          if (saved.rest.length === restoredRig.R.length) {
+            maskRef.current = saved.mask;
+            rebuildRig(false, restoredRig);
+            restore(saved, false);
+            baselineRef.current = snapshot();
+            setStatus("ready");
+            setMessage("已恢复上次保存的造型和发色，可以继续修改。按住「看原图」可对照最初的照片。");
+            setRevision((value) => value + 1);
+            paint();
+            settledRef.current();
+            return;
+          }
+        }
         rebuildRig(false);
         setRevision((v) => v + 1);
         paint();
         await detect();
+        if (cancelled) return;
+        baselineRef.current = snapshot();
+        setRevision((value) => value + 1);
       } catch (e) {
         if (!cancelled) {
           setStatus("error");
@@ -539,10 +614,16 @@ export default function HairEditor({
       cancelled = true;
       disposedRef.current = true;
       segmentationSeqRef.current++;
+      const fill = fillRef.current;
+      fill.key++;
+      fill.patch = null;
+      clearTimeout(fill.timer);
+      fill.abort?.abort();
+      fill.abort = null;
       cancelAnimationFrame(frameRef.current);
       frameRef.current = 0;
     };
-  }, [imageSrc, sourcePanel?.[0], sourcePanel?.[1], detect, paint, rebuildRig]);
+  }, [imageSrc, sourcePanel?.[0], sourcePanel?.[1], initialState, detect, paint, rebuildRig, snapshot]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -554,6 +635,7 @@ export default function HairEditor({
       const original = originalRef.current,
         rig = rigRef.current;
       rendererRef.current = createHairRenderer(canvas);
+      uploadedImageRef.current = null;
       if (!rendererRef.current || !original) return;
       rendererRef.current.setImage(original, underRef.current);
       if (rig) {
@@ -602,7 +684,14 @@ export default function HairEditor({
     if (fillEnabledRef.current) settledRef.current();
     else {
       clearTimeout(fillRef.current.timer);
+      // Disable synchronously and invalidate the request's generation. Even a
+      // fetch implementation that resolves after abort cannot restore a patch.
+      fillRef.current.abort?.abort();
+      fillRef.current.abort = null;
+      fillRef.current.key++;
+      fillRef.current.patch = null;
       showFill(false);
+      setFillState("idle");
     }
   }, [fillAvailable, aiFill]);
 
@@ -611,19 +700,22 @@ export default function HairEditor({
     else if (!frameRef.current) settledRef.current();
   }, [comparing]);
 
-  function restore(entry) {
+  function restore(entry, animateRest = true) {
+    colorGestureRef.current = null;
+    colorRef.current = { ...(entry.color ?? DEFAULT_HAIR_COLOR) };
+    setColor(colorRef.current);
     if (entry.mask !== maskRef.current) {
       maskRef.current = entry.mask;
       rebuildRig(false);
       if (entry.rest) setRest(rigRef.current, entry.rest, false);
     } else if (entry.rest && rigRef.current) {
-      setRest(rigRef.current, entry.rest, true);
+      setRest(rigRef.current, entry.rest, animateRest);
       invalidateFill();
     }
     updateCoverage();
-    setChanged(restChanged(rigRef.current));
+    refreshColor();
     setRevision((v) => v + 1);
-    animate();
+    if (animateRest) animate();
   }
   function undo() {
     if (!undoRef.current.length || strokeRef.current || status === "segmenting")
@@ -816,7 +908,7 @@ export default function HairEditor({
         updateCoverage();
       } else {
         invalidateFill();
-        setChanged(restChanged(rigRef.current));
+        setChanged(restChanged(rigRef.current) || hasHairColor(colorRef.current));
       }
     }
     setRevision((v) => v + 1);
@@ -827,11 +919,15 @@ export default function HairEditor({
     if (!rig || status === "segmenting") return;
     pushHistory(snapshot());
     setRest(rig, new Float32Array(rig.R0), true);
+    colorRef.current = { ...DEFAULT_HAIR_COLOR };
+    setColor(colorRef.current);
+    colorGestureRef.current = null;
+    refreshColor();
     invalidateFill();
     setChanged(false);
     setRevision((v) => v + 1);
     animate();
-    setMessage("已恢复原来的发型。选区保留，可以继续整理。");
+    setMessage("已恢复原来的发型和自然发色。选区保留，可以继续整理或试色。");
   }
   function clearMask() {
     const original = originalRef.current;
@@ -845,6 +941,36 @@ export default function HairEditor({
     setRevision((v) => v + 1);
     setMessage("选区已清空。用「涂选」刷过头发，避开脸和衣服。");
   }
+  function beginColorGesture() {
+    if (!colorGestureRef.current) colorGestureRef.current = snapshot();
+  }
+  function endColorGesture() {
+    const before = colorGestureRef.current;
+    colorGestureRef.current = null;
+    if (before && (before.color.id !== colorRef.current.id || before.color.intensity !== colorRef.current.intensity)) {
+      pushHistory(before);
+      setRevision((value) => value + 1);
+    }
+  }
+  function changeColor(next, recordHistory = true) {
+    if (next.id === colorRef.current.id && next.intensity === colorRef.current.intensity) return;
+    if (recordHistory) {
+      endColorGesture();
+      pushHistory(snapshot());
+    } else beginColorGesture();
+    colorRef.current = { ...next };
+    setColor(colorRef.current);
+    refreshColor();
+    invalidateFill();
+    paint();
+    if (!frameRef.current) settledRef.current();
+    setRevision((value) => value + 1);
+  }
+  function toggleAiFill(enabled) {
+    fillEnabledRef.current = fillAvailable && enabled;
+    if (!fillEnabledRef.current) invalidateFill();
+    setAiFill(enabled);
+  }
   // Exports use the settled style: no breeze, no swing in progress.
   function outputCanvas(useOriginal = false) {
     const original = originalRef.current,
@@ -853,13 +979,13 @@ export default function HairEditor({
       useOriginal || !rig
         ? new Uint8ClampedArray(original.data)
         : renderHair({
-            image: original,
+            image: colorImageRef.current ?? original,
             mask: maskRef.current,
             plate: plateRef.current,
             field: hairField(rig, undefined, { dynamic: false }),
             rig,
             soft: softRef.current,
-            under: underRef.current,
+            under: colorUnderRef.current,
           });
     const canvas = document.createElement("canvas");
     canvas.width = original.width;
@@ -875,6 +1001,19 @@ export default function HairEditor({
   function outputImage(useOriginal = false) {
     return outputCanvas(useOriginal).toDataURL("image/png");
   }
+  function savePreview() {
+    const editorState = snapshot();
+    baselineRef.current = editorState;
+    setDirty(false);
+    onDirtyChange?.(false);
+    onSave({
+      image: outputImage(),
+      original: outputImage(true),
+      colorName: hasHairColor(colorRef.current) ? hairColorName(colorRef.current.id) : "自然色",
+      color: { ...colorRef.current },
+      editorState,
+    });
+  }
   async function download() {
     const blob = await new Promise((resolve) =>
       outputCanvas().toBlob(resolve, "image/png"),
@@ -886,7 +1025,7 @@ export default function HairEditor({
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "Hairroom-手动整理预览.png";
+    a.download = "Hairroom-发型发色预览.png";
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 10000);
   }
@@ -976,9 +1115,11 @@ export default function HairEditor({
           )}
           <span className="hair-stage-badge">
             {comparing
-              ? "整理前"
+              ? "原图"
               : fillState === "working"
                 ? "AI 补全中…"
+                : hasHairColor(color)
+                  ? `本机试色 · ${hairColorName(color.id)}`
                 : fillState === "shown" && aiFill && fillAvailable
                   ? "发丝模拟 · 本机 AI 补全"
                   : "发丝模拟 · 二维预览"}
@@ -1012,7 +1153,7 @@ export default function HairEditor({
             onBlur={() => setComparing(false)}
           >
             <Eye size={14} />
-            按住看整理前
+            按住看原图
           </button>
         </div>
         <p
@@ -1049,12 +1190,63 @@ export default function HairEditor({
             </button>
           ))}
         </div>
+        <section className="hair-color-controls" aria-labelledby="hair-color-heading">
+          <div className="hair-color-heading">
+            <span><Palette size={15} /><strong id="hair-color-heading">试一试发色</strong></span>
+            <button
+              type="button"
+              disabled={!hasHairColor(color) || !ready || status === "segmenting"}
+              onClick={() => changeColor({ ...color, id: "natural" })}
+            >还原自然色</button>
+          </div>
+          <div className="hair-color-swatches" aria-label="发色色板">
+            {HAIR_COLORS.map((shade) => (
+              <button
+                key={shade.id}
+                type="button"
+                className={color.id === shade.id ? "selected" : ""}
+                aria-pressed={color.id === shade.id}
+                aria-label={`发色：${shade.name}`}
+                disabled={!ready || status === "segmenting"}
+                onClick={() => changeColor({ ...color, id: shade.id })}
+              >
+                <span
+                  className={`hair-color-chip ${shade.id === "natural" ? "natural" : ""}`}
+                  style={{ "--swatch": shade.hex }}
+                  aria-hidden="true"
+                >{color.id === shade.id && <Check size={12} />}</span>
+                {shade.name}
+              </button>
+            ))}
+          </div>
+          <label className="hair-range hair-color-intensity">
+            <span>发色强度<output>{Math.round(color.intensity * 100)}%</output></span>
+            <input
+              type="range"
+              aria-label="发色强度"
+              min="0"
+              max="100"
+              step="5"
+              value={Math.round(color.intensity * 100)}
+              disabled={!ready || status === "segmenting" || color.id === "natural"}
+              onPointerDown={beginColorGesture}
+              onPointerUp={endColorGesture}
+              onPointerCancel={endColorGesture}
+              onLostPointerCapture={endColorGesture}
+              onBlur={endColorGesture}
+              onKeyUp={endColorGesture}
+              onChange={(event) => changeColor({ ...color, intensity: Number(event.target.value) / 100 }, false)}
+            />
+            <div><small>保留原发色</small><small>更明显</small></div>
+          </label>
+          <p>只在头发选区内试色，保留明暗与发丝纹理。可修正绿色选区来避开皮肤；实际染发会受发质和底色影响。</p>
+        </section>
         {fillAvailable && (
           <label className="hair-breeze">
             <input
               type="checkbox"
               checked={aiFill}
-              onChange={(e) => setAiFill(e.target.checked)}
+              onChange={(e) => toggleAiFill(e.target.checked)}
             />
             <Sparkles size={15} strokeWidth={1.5} />
             <span>
@@ -1183,17 +1375,15 @@ export default function HairEditor({
         <div className="hair-editor-actions">
           <button
             className="primary-button"
-            disabled={!changed || status === "segmenting"}
-            onClick={() =>
-              onSave({ image: outputImage(), original: outputImage(true) })
-            }
+            disabled={!dirty || status === "segmenting"}
+            onClick={savePreview}
           >
-            保存整理预览
+            保存编辑预览
             <ArrowRight size={15} />
           </button>
           <button
             className="secondary-button"
-            disabled={!changed || status === "segmenting"}
+            disabled={!(changed || dirty) || status === "segmenting"}
             onClick={download}
           >
             <ArrowDownToLine size={15} />
