@@ -68,7 +68,7 @@ Hairroom 是一个本地运行的发型探索与理发沟通工作室。你可�
 | 方案与沟通卡 | 收藏款式，将参考图、整理结果与理发要点导出为 PNG 沟通卡 |
 | 本机 AI 补全（可选） | 用本地 NVIDIA GPU 补画头发移开后露出的区域，需要另装 Python 服务与模型 |
 | API 试戴（可选） | 通过服务器调用 OpenAI Images 编辑接口，需要自己的 API key 和可用模型权限 |
-| 参考图试戴（可选） | 上传自己的照片和喜欢的发型参考，明确授权后同时提交两图，借鉴发型、保留本人五官与原发色 |
+| 参考图试戴（可选） | 上传自己的照片和喜欢的发型参考，明确授权后同时提交两图，提示模型借鉴发型并尽量保留本人五官与原发色 |
 
 进入工作室后，点击照片旁的「整理头发 / 试发色」（示例模式为「用示例整理 / 试发色」）进入编辑器；「标注理发想法」用于画线、圈选与备注。保存后点击「保存我的沟通卡」，可导出自己的整理或标注结果。款式详情也能分别编辑和标注；工作室下方的「带着喜欢的发型来」提供参考图试戴。
 
@@ -149,7 +149,7 @@ The interface combines warm whites, sage green, and editorial typography, with d
 | Salon cards | Save style choices and export references, edited previews, and consultation notes as a PNG |
 | Optional local AI fill | A separate Python service uses an NVIDIA GPU to fill regions uncovered by moving hair |
 | Optional API try-on | A server-side OpenAI Images editing integration using your own API key and model access |
-| Optional reference try-on | Your portrait and a hairstyle reference, sent together after explicit consent; the prompt preserves your identity and original hair color |
+| Optional reference try-on | Your portrait and a hairstyle reference, sent together after explicit consent; the prompt asks the model to preserve your identity and original hair color |
 
 In the studio, choose **整理头发 / 试发色** (edit hair / try color) beside your photo, or **用示例整理 / 试发色** for a fictional demo. **标注理发想法** opens the annotation tools. Save and choose **保存我的沟通卡** to export the edited or marked image with your notes. Style details also support their own edits and annotations. The **带着喜欢的发型来** section below the suggestions accepts a reference image.
 
